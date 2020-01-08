@@ -1,5 +1,6 @@
 import cv2
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 def show_image(img, *args, **kwargs):
@@ -51,11 +52,15 @@ def draw_rects(in_img, rects, colour=(255, 0, 0)):
     return img
 
 
-def display_contours(in_img, contours, colour=(0, 0, 255), thickness=2):
+def draw_contours(in_img, contours, colour=(255, 0, 0)):
     """Displays contours on the image."""
+
     img = convert_when_colour(colour, in_img.copy())
+
+    thickness = int(max(img.shape) / 150)
+
     img = cv2.drawContours(img, contours, -1, colour, thickness)
-    show_image(img)
+    return img
 
 
 def convert_when_colour(colour, img):
@@ -67,3 +72,18 @@ def convert_when_colour(colour, img):
         elif img.shape[2] == 1:
             img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
     return img
+
+
+def compound_digits(digits, colour=255):
+    """Shows list of 81 extracted digits in a grid format"""
+    rows = []
+    with_border = [
+        cv2.copyMakeBorder(img.copy(), 1, 1, 1, 1, cv2.BORDER_CONSTANT, None, colour)
+        for img in digits
+    ]
+
+    for i in range(9):
+        row = np.concatenate(with_border[i * 9: ((i + 1) * 9)], axis=1)
+        rows.append(row)
+
+    return np.concatenate(rows)
