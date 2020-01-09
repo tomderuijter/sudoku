@@ -86,3 +86,4 @@ def plot_many_images(images, titles, rows=1, columns=2):
         plt.title(titles[i])
         plt.xticks([]), plt.yticks([])  # Hide tick marks
     plt.show()
+
