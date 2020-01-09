@@ -11,8 +11,9 @@ def load_image(path):
 def parse_grid(img):
     cropped = crop_to_grid(img)
     enhanced_digits = enhance_digits(cropped)
-    digits = extract_digits(enhanced_digits)
-
+    squares = infer_grid(enhanced_digits)
+    patches = extract_patches(enhanced_digits, squares)
+    digits = [extract_digit(patch) for patch in patches]
     return digits
 
 
@@ -199,28 +200,164 @@ def cut_from_rectangle(img, rect):
     return img[int(rect[0][1]) : int(rect[1][1]), int(rect[0][0]) : int(rect[1][0])]
 
 
-def extract_digits(img):
-    # TODO Make pretty later
-    squares = infer_grid(img)
-    patches = extract_patches(img, squares)
-    digits = [extract_digit(patch) for patch in patches]
-    pp_digits = [preprocess_digit(digit) for digit in digits]
-    return pp_digits
-
-
 def extract_patches(img, squares):
     return [cut_from_rectangle(img, square) for square in squares]
 
 
 def extract_digit(patch):
-    corners = find_corners_of_largest_polygon(
-        cv2.bitwise_not(patch.copy(), patch.copy())
+
+    patch = cv2.copyMakeBorder(
+        patch,
+        2,
+        2,
+        2,
+        2,
+        cv2.BORDER_CONSTANT,
     )
-    cropped = crop_and_warp(patch, corners)
-    return cropped
+
+    contours, _ = cv2.findContours(
+        patch, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE
+    )
+    #     print("Nr. contours:", len(contours))
+
+    width = patch.shape[1]
+    height = patch.shape[0]
+
+    contours = filter_contour_length(contours)
+    # print("After lenght filter:", len(contours))
+    contours = filter_center_of_mass(width, height, contours)
+    # print("After center filter:", len(contours))
+    contours = filter_contours_near_corner(width, height, contours)
+    # print("After corner filter:", len(contours))
+
+    if len(contours) == 0:
+        return np.zeros((28, 28))
+
+    digit = crop_from_contours(patch, contours)
+
+    #     show_image(digit)
+
+    digit = pad_digit(digit)
+    #     show_image(digit)
+
+    digit = resize_digit(digit)
+    return digit
 
 
-def preprocess_digit(digit, size=28):
-    c = 255
+def filter_contour_length(contours):
+    return [c for c in contours if len(c) > 4]
+
+
+def filter_center_of_mass(width, height, contours):
+    approved_contours = []
+    for c in contours:
+        M = cv2.moments(c)
+        if M["m00"] == 0:
+            continue
+
+        cX = int(M["m10"] / M["m00"])
+        cY = int(M["m01"] / M["m00"])
+
+        if not in_center(width, height, cX, cY):
+            continue
+
+        approved_contours.append(c)
+    return approved_contours
+
+
+def in_center(width, height, c_x, c_y, fraction=0.4):
+    margin_fraction = (1.0 - fraction) / 2
+
+    width_margin = width * margin_fraction
+    in_center_x = width_margin <= c_x <= (width - width_margin)
+
+    height_margin = height * margin_fraction
+    in_center_y = height_margin <= c_y <= (height - height_margin)
+
+    return in_center_x and in_center_y
+
+
+def filter_contours_near_corner(width, height, contours, fraction=1/8):
+    accepted_contours = []
+    for i, c in enumerate(contours):
+        # print("Contour", i)
+        x, y, w, h = cv2.boundingRect(c)
+        rect = (
+            (x, y),
+            (x + w, y + h)
+        )
+        #         image = patch.copy()
+        #         image = draw_rects(image, [rect], colour=(0, 255, 0))
+        #         show_image(image)
+
+        corners = (
+            (x, y),
+            (x + w, y),
+            (x, y + h),
+            (x + w, y + h)
+        )
+
+        near_corner = False
+        for point in corners:
+            if in_corner(width, height, point[0], point[1], fraction):
+                # print("Patch rejected: near image corner")
+                near_corner = True
+                break
+
+        if not near_corner:
+            accepted_contours.append(c)
+
+    return accepted_contours
+
+
+def in_corner(width, height, x, y, fraction=1/8):
+    width_margin = int(width * fraction)
+    height_margin = int(height * fraction)
+
+    in_top_left = x <= width_margin and y <= height_margin
+    in_top_right = x >= width - width_margin and y <= height_margin
+    in_bot_left = x <= width_margin and y >= height - height_margin
+    in_bot_right = x >= width - width_margin and y >= height - height_margin
+
+    return in_top_left or in_top_right or in_bot_left or in_bot_right
+
+
+def crop_from_contours(patch, contours):
+    #     image = draw_contours(patch.copy(), contours)
+    x, y, w, h = cv2.boundingRect(np.concatenate(contours, axis=0))
+    #     cv2.rectangle(image,(x,y),(x+w,y+h),(0,255,0),2)
+    #     show_image(image)
+
+    rect = (
+        (x, y),
+        (x + w, y + h)
+    )
+    return cut_from_rectangle(patch.copy(), rect)
+
+
+def pad_digit(digit, v_margin=0.1):
+
+    height = digit.shape[0]
+    width = digit.shape[1]
+
+    height = max(height, width)
+
+    vertical_margin = int(height * v_margin)
+    padded_height = height + 2 * vertical_margin
+
+    horizontal_margin = int((padded_height - width) / 2)
+
+    padded_digit = cv2.copyMakeBorder(
+        digit,
+        vertical_margin,
+        vertical_margin,
+        horizontal_margin,
+        horizontal_margin,
+        cv2.BORDER_CONSTANT,
+    )
+    return padded_digit
+
+
+def resize_digit(digit, size=28):
     digit = cv2.resize(digit, (size, size))
     return digit
